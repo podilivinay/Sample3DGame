@@ -10,105 +10,156 @@ import UIKit
 import QuartzCore
 import SceneKit
 
-class GameViewController: UIViewController {
+class GameViewController: UIViewController, SCNSceneRendererDelegate {
+    var gameView:SCNView!
+    var gameScene:SCNScene!
+    var cameraNode:SCNNode!
+    var targetCreationTime:TimeInterval = 0
+    var gamePoint = 0
+    var gameLimit = 30
+    var timer = Timer()
 
+    @IBOutlet weak var timeLimitLabel: UILabel!
+    @IBOutlet weak var scoreTitleLabel: UILabel!
+    @IBOutlet weak var scoreLabel: UILabel!
+    @IBOutlet weak var gameOverButton: UIButton!
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        // create a new scene
-        let scene = SCNScene(named: "art.scnassets/ship.scn")!
-        
-        // create and add a camera to the scene
-        let cameraNode = SCNNode()
-        cameraNode.camera = SCNCamera()
-        scene.rootNode.addChildNode(cameraNode)
-        
-        // place the camera
-        cameraNode.position = SCNVector3(x: 0, y: 0, z: 15)
-        
-        // create and add a light to the scene
-        let lightNode = SCNNode()
-        lightNode.light = SCNLight()
-        lightNode.light!.type = .omni
-        lightNode.position = SCNVector3(x: 0, y: 10, z: 10)
-        scene.rootNode.addChildNode(lightNode)
-        
-        // create and add an ambient light to the scene
-        let ambientLightNode = SCNNode()
-        ambientLightNode.light = SCNLight()
-        ambientLightNode.light!.type = .ambient
-        ambientLightNode.light!.color = UIColor.darkGray
-        scene.rootNode.addChildNode(ambientLightNode)
-        
-        // retrieve the ship node
-        let ship = scene.rootNode.childNode(withName: "ship", recursively: true)!
-        
-        // animate the 3d object
-        ship.runAction(SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: 2, z: 0, duration: 1)))
-        
-        // retrieve the SCNView
-        let scnView = self.view as! SCNView
-        
-        // set the scene to the view
-        scnView.scene = scene
-        
-        // allows the user to manipulate the camera
-        scnView.allowsCameraControl = true
-        
-        // show statistics such as fps and timing information
-        scnView.showsStatistics = true
-        
-        // configure the view
-        scnView.backgroundColor = UIColor.black
-        
-        // add a tap gesture recognizer
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-        scnView.addGestureRecognizer(tapGesture)
+        self.initView()
+        self.initScene()
+        self.initCamera()
+        self.viewsBringToFront()
+        self.startTimer()
     }
-    
-    func handleTap(_ gestureRecognize: UIGestureRecognizer) {
-        // retrieve the SCNView
-        let scnView = self.view as! SCNView
+    func initView() {
+        gameView = SCNView(frame: CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height), options: nil)
+        gameView.allowsCameraControl = true
+        gameView.autoenablesDefaultLighting = true
+        gameView.delegate = self
+        self.view.addSubview(gameView)
+    }
+    func initScene() {
+        gameScene = SCNScene()
+        gameView.scene = gameScene
+        gameView.isPlaying = true // Endless playing
+    }
+    func initCamera() {
+        cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(x: 0, y: 0, z: 10)
+        gameScene.rootNode.addChildNode(cameraNode)
+    }
+    func viewsBringToFront() {
+        self.timeLimitLabel.superview?.bringSubview(toFront: self.timeLimitLabel)
+
+        self.scoreTitleLabel.superview?.bringSubview(toFront: self.scoreTitleLabel)
+        self.scoreLabel.superview?.bringSubview(toFront: self.scoreLabel)
+        self.gameOverButton.superview?.bringSubview(toFront: self.gameOverButton)
+    }
+    func createTarget() {
+        let geometry:SCNGeometry = SCNPyramid(width: 1, height: 1, length: 1)
+        let randomColor = arc4random_uniform(2) == 0 ? UIColor.green : UIColor.red //get random color
+        geometry.materials.first?.diffuse.contents = randomColor
+        let geometryNode = SCNNode(geometry: geometry)
         
-        // check what nodes are tapped
-        let p = gestureRecognize.location(in: scnView)
-        let hitResults = scnView.hitTest(p, options: [:])
-        // check that we clicked on at least one object
-        if hitResults.count > 0 {
-            // retrieved the first clicked object
-            let result: AnyObject = hitResults[0]
-            
-            // get its material
-            let material = result.node!.geometry!.firstMaterial!
-            
-            // highlight it
-            SCNTransaction.begin()
-            SCNTransaction.animationDuration = 0.5
-            
-            // on completion - unhighlight
-            SCNTransaction.completionBlock = {
-                SCNTransaction.begin()
-                SCNTransaction.animationDuration = 0.5
-                
-                material.emission.contents = UIColor.black
-                
-                SCNTransaction.commit()
-            }
-            
-            material.emission.contents = UIColor.red
-            
-            SCNTransaction.commit()
+        geometryNode.physicsBody = SCNPhysicsBody(type: .dynamic, shape: nil)
+        if randomColor == UIColor.red {
+            geometryNode.name = "enemy"
+        } else {
+            geometryNode.name = "friend"
+        }
+        gameScene.rootNode.addChildNode(geometryNode)
+        let randomDirection:Float = arc4random_uniform(2) == 0 ? -1.0 : 1.0
+        let force = SCNVector3(x: randomDirection, y: 15, z: 0)
+        geometryNode.physicsBody?.applyForce(force, at: SCNVector3(x: 0.05, y: 0.05, z: 0.05), asImpulse: true)
+    }
+    func startTimer() {
+        gameLimit = 30
+        timer.invalidate() // just in case this button is tapped multiple times
+        
+        // start the timer
+        timer = Timer.scheduledTimer(timeInterval: 1.0, target: self, selector: #selector(timerAction), userInfo: nil, repeats: true)
+
+    }
+    // called every time interval from the timer
+    func timerAction() {
+        gameLimit -= 1
+        self.timeLimitLabel.text = "\(gameLimit)"
+        if gameLimit == 0 {
+            timer.invalidate()
+            self.gameOverButton.isHidden = false
+            gameView.backgroundColor = UIColor.red
+            showGameOverStatus(status: false)
         }
     }
-    
+    func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        if time > targetCreationTime {
+            createTarget()
+            targetCreationTime = time + 0.6
+        }
+        cleanUp()
+    }
+    func cleanUp() {
+        for node in gameScene.rootNode.childNodes {
+            if node.presentation.position.y < -2 {
+                node.removeFromParentNode()
+            }
+        }
+    }
+    func cleanUpAllNodes() {
+        for node in gameScene.rootNode.childNodes {
+            node.removeFromParentNode()
+        }
+    }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        let touch  = touches.first!
+        let location = touch.location(in: gameView)
+        let hitList = gameView.hitTest(location, options: nil)
+        if let hitObject = hitList.first {
+            let node = hitObject.node
+            if node.name == "friend" {
+                gamePoint += 10
+                node.removeFromParentNode()
+                gameView.backgroundColor = UIColor.white
+            } else {
+                gameView.backgroundColor = UIColor.red
+                showGameOverStatus(status: false)
+            }
+        }
+        self.scoreLabel.text = String(gamePoint)
+    }
+    func showGameOverStatus(status:Bool) {
+        if !status {
+            cleanUpAllNodes()
+            gameView.isUserInteractionEnabled = false
+            gameOverButton.isUserInteractionEnabled = true
+            gameScene.isPaused = true
+            gameView.isHidden = true
+            timeLimitLabel.isHidden = true
+            timer.invalidate()
+        } else {
+            gameScene.isPaused = false
+        }
+       //gameView.isPlaying = status
+       gameOverButton.isHidden = status
+    }
+    @IBAction func gameOverAction(_ sender: Any) {
+        showGameOverStatus(status: true)
+        gamePoint = 0
+        gameView.backgroundColor = UIColor.white
+        self.view.isUserInteractionEnabled = true
+        gameView.isHidden = false
+        timeLimitLabel.isHidden = false
+        startTimer()
+    }
+    func handleTap(_ gestureRecognize: UIGestureRecognizer) {
+    }
     override var shouldAutorotate: Bool {
         return true
     }
-    
     override var prefersStatusBarHidden: Bool {
         return true
     }
-    
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         if UIDevice.current.userInterfaceIdiom == .phone {
             return .allButUpsideDown
